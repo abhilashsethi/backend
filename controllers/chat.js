@@ -164,11 +164,44 @@ const leaveGroup = TryCatch(async (req, res, next) => {
     return res.status(200).json({ success: true, message: "member left the group" })
 })
 
+const sendAttachments = TryCatch(async (req, res, next) => {
+
+    const { chatId } = req.body
+    const [chat, me] = await Promise.all([Chat.findById(chatId), User.findById(req.userId)])
+    if (!chat) return next(new ErrorHandler("chat not found", 404))
+
+    const files = req.files || []
+    if (files.length < 1) return next(new ErrorHandler("please provide attachments", 400))
+
+    const attachments = []
+
+    const messageForRealTime = {
+        content: "",
+        attachments,
+        sender:{
+            _id: me._id,
+            name: me.name,
+        },
+        chatId
+    }
+
+    const messageForDB = {
+        content: "",
+        attachments,
+        sender: me._id,
+        chatId
+    }
+emitEvent()
+
+    return res.status(200).json({ success: true, message: "attachments sent successfully" })
+})
+
 export {
     newGroupChat,
     getMyChats,
     getMyGroups,
     addMembers,
     removeMember,
-    leaveGroup
+    leaveGroup,
+    sendAttachments
 }
