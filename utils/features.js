@@ -9,24 +9,26 @@ const cookieOptions = {
     secure: true
 }
 
-const connectDB = (uri)=>{
-    mongoose.connect(uri, {dbName: "chatApp"}).then((data)=>{
+const connectDB = (uri) => {
+    mongoose.connect(uri, { dbName: "chatApp" }).then((data) => {
         console.log(`Connect to db ${data.connection.host}`)
-    }).catch((err)=>{
+    }).catch((err) => {
         throw err
     })
 }
 
-const sendToken = (res, user, code, message)=>{
-    const token = jwt.sign({id: user._id}, process.env.JWT_SECRET)
+const sendToken = (res, user, code, message) => {
+    const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET)
 
-    return res.status(code).cookie("chatApp-Token", token,cookieOptions).json({
+    return res.status(code).cookie("chatApp-Token", token, cookieOptions).json({
         success: true,
         user,
         message
     })
-
-    
 }
 
-export {connectDB, sendToken, cookieOptions}
+const emitEvent = (req, event, users, data) => {
+    console.log("Emmitting event", event)
+}
+
+export { connectDB, sendToken, cookieOptions, emitEvent }
