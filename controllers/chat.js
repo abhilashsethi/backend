@@ -2,9 +2,10 @@ import { TryCatch } from "../middlewares/error.js";
 import { ErrorHandler } from "../utils/utility.js";
 import { Chat } from "../models/chat.js";
 import { User } from "../models/user.js";
-import { emitEvent } from "../utils/features.js";
-import { ALERT, REFETCH_CHATS } from "../constants/events.js";
+import { deleteFilesFromCloudinary, emitEvent } from "../utils/features.js";
+import { ALERT, NEW_ATTACHMENTS, NEW_MESSAGE_ALERT, REFETCH_CHATS } from "../constants/events.js";
 import { getOtherMemers } from "../lib/helper.js";
+import { Message } from "../models/message.js";
 
 
 
@@ -175,25 +176,94 @@ const sendAttachments = TryCatch(async (req, res, next) => {
 
     const attachments = []
 
-    const messageForRealTime = {
-        content: "",
-        attachments,
-        sender:{
-            _id: me._id,
-            name: me.name,
-        },
-        chatId
-    }
-
     const messageForDB = {
         content: "",
         attachments,
         sender: me._id,
-        chatId
+        chat: chatId
     }
-emitEvent()
 
-    return res.status(200).json({ success: true, message: "attachments sent successfully" })
+    const messageForRealTime = {
+        ...messageForDB,
+        sender: {
+            _id: me._id,
+            name: me.name,
+        }
+    }
+
+    const message = await Message.create(messageForDB)
+
+    emitEvent(req, NEW_ATTACHMENTS, chat.members, {
+        message: messageForRealTime,
+        chatId,
+    })
+    emitEvent(req, NEW_MESSAGE_ALERT, chat.members, {
+        chatId,
+    })
+
+    return res.status(200).json({ success: true, message })
+})
+
+const getChatDetails = TryCatch(async (req, res, next) => {
+
+    if (req.query.populate === "true") {
+        const chat = await Chat.findById(req.params.id).populate("members", "name, avatar").lean()
+
+        if (!chat) return next(new ErrorHandler("chat not found", 404))
+
+        chat.members = chat.members.map(({ _id, name, avatar }) => ({
+            _id,
+            name,
+            avatar: avatar.url
+        }))
+        return res.status(200).json({ success: true, chat })
+    }
+    else {
+        const chat = await Chat.findById(req.params.id)
+        if (!chat) return next(new ErrorHandler("chat not found", 404))
+        return res.status(200).json({ success: true, chat })
+    }
+
+})
+
+const renameGroup = TryCatch(async (req, res, next) => {
+    const chatId = req.params.id
+    const { name } = req.body
+    const chat = await Chat.findById(chatId)
+    if (!chat) return next(new ErrorHandler("chat not found", 404))
+    if (!chat.groupChat) return next(new ErrorHandler("this is not a group chat", 400))
+    if (chat.creator.toString() !== req.userId.toString()) return next(new ErrorHandler("only group creator can rename the group", 403))
+    chat.name = name
+    await chat.save()
+    emitEvent(req, REFETCH_CHATS, chat.members)
+    return res.status(200).json({ success: true, message: "Group renamed successfully" })
+})
+
+const deleteChat = TryCatch(async (req, res, next) => {
+    const chatId = req.params.id
+    const chat = await Chat.findById(chatId)
+    if (!chat) return next(new ErrorHandler("chat not found", 404))
+    const members = chat.members
+    if (chat.groupChat && chat.creator.toString() !== req.userId.toString()) return next(new ErrorHandler("You are not allowed to delete this group", 403))
+    if (!chat.groupChat && !chat.members.includes(req.userId.toString())) return next(new ErrorHandler("You are not allowed to delete this chat", 403))
+
+    const messagesWithAttachment = await Message.find({ chat: chatId, attachments: { $exists: true, $ne: [] } })
+
+    const public_ids = []
+    messagesWithAttachment.forEach(({ attachments }) =>
+        attachments.forEach(({ public_id }) =>
+            public_ids.push(public_id)
+        )
+    )
+
+    await Promise.all([
+        deleteFilesFromCloudinary(public_ids),
+        chat.deleteOne(),
+        Message.deleteMany({ chat: chatId }),
+    ])
+
+    emitEvent(req, REFETCH_CHATS, members)
+    return res.status(200).json({ success: true, message: "Chat deleted successfully" })
 })
 
 export {
@@ -203,5 +273,8 @@ export {
     addMembers,
     removeMember,
     leaveGroup,
-    sendAttachments
+    sendAttachments,
+    getChatDetails,
+    renameGroup,
+    deleteChat
 }
